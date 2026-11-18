@@ -62,6 +62,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .note{margin-top:8px;font-size:.9rem;background:#fff8e1;padding:8px;border-radius:10px}.note.ie{background:#e8f0fe}
 .src{margin-top:8px;font-size:.72rem;color:var(--mut);direction:ltr;text-align:start}
 .grades{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.grades.two{grid-template-columns:1fr 1fr}.grades.two button{min-height:64px;font-size:1.05rem}
+.btn .pct{display:block;font-size:2.4rem;font-weight:800;line-height:1.1;margin:4px 0}
 .grades button{min-height:54px;border-radius:12px;border:0;font-weight:700;color:#fff;font-size:.85rem}
 .g0{background:#c62828}.g1{background:#ef6c00}.g2{background:#2e7d32}.g3{background:#1565c0}
 .prog{display:flex;align-items:center;gap:10px;font-size:.85rem}.prog .bar{flex:1}
@@ -148,7 +150,7 @@ const store = (() => {
 /* Saved state is read defensively: same key, unknown/old/damaged fields are repaired, nothing is dropped. */
 const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
 function normState(o) {
-  const d = { lang: 'he', xp: 0, streak: { last: '', n: 0, max: 0 }, cards: {}, badges: {}, exams: [], tts: false, rate: 1, answered: 0, correct: 0, bestCombo: 0 };
+  const d = { lang: 'he', xp: 0, streak: { last: '', n: 0, max: 0 }, cards: {}, badges: {}, exams: [], tts: false, rate: 1, answered: 0, correct: 0, bestCombo: 0, first: {}, all: {} };
   if (!o || typeof o !== 'object' || Array.isArray(o)) return d;
   const s = Object.assign(d, o);
   s.lang = s.lang === 'en' ? 'en' : 'he';
@@ -164,6 +166,10 @@ function normState(o) {
     const v = cs[k]; if (!v || typeof v !== 'object') return;
     s.cards[k] = Object.assign({}, v, { b: Math.max(0, Math.min(5, num(v.b, 0))), due: num(v.due, 0), s: num(v.s, 0), c: num(v.c, 0), w: num(v.w, 0) });
   });
+  /* first-try result per card; older saves did not record it, so a card never answered wrong counts as right first time */
+  const f = s.first && typeof s.first === 'object' && !Array.isArray(s.first) ? s.first : {};
+  s.first = {};
+  Object.keys(s.cards).forEach(k => { const v = s.cards[k]; if (k in f) s.first[k] = f[k] ? 1 : 0; else if (v.s > 0) s.first[k] = v.w === 0 && v.c > 0 ? 1 : 0; });
   return s;
 }
 function loadState() {
@@ -178,6 +184,14 @@ const save = () => { try { store.set(KEY, JSON.stringify(ST)); } catch (e) { /* 
 const T = {
   title: ['RSA Driving Test Trainer', 'אימון למבחן הנהיגה (RSA)'],
   home: ['Home', 'בית'],
+  all: ['All questions', 'כל השאלות'],
+  allKnown: ['known', 'ידועות'],
+  allDone: ['You know every question!', 'את יודעת את כל השאלות!'],
+  repeat: ['Repeat', 'חזרי על זה'],
+  firstTry: ['right the first time', 'נכון בפעם הראשונה'],
+  ofAll: ['of all', 'מתוך כל'],
+  questions: ['questions', 'השאלות'],
+  iKnow: ['I know', 'אני יודעת'],
   daily: ['Daily mix', 'אימון יומי'],
   dailySub: ['20 cards: due and weak first', '20 כרטיסים: קודם מה שצריך לחזור עליו'],
   sim: ['Test simulation', 'סימולציית מבחן צעד אחר צעד'],
@@ -274,6 +288,8 @@ function applyGrade(id, g, missedEarlier) { /* g: 0 again, 1 hard, 2 good, 3 eas
   /* s.miss = missed in the last session that touched it. A card missed and then fixed on the in-session retry keeps
      the flag (and stays due), so the next session shows it first; a clean correct answer clears it. */
   if (g === 0 || missedEarlier) s.miss = 1; else delete s.miss;
+  const fk = (typeof CANON !== 'undefined' && CANON[id]) || id;
+  if (!(fk in ST.first)) ST.first[fk] = g >= 1 && !missedEarlier ? 1 : 0;
   /* a correct answer never comes back the same day: it goes to the end of the line. */
   s.due = Date.now() + (s.ok && !missedEarlier ? Math.max(1, INT[s.b]) : 0) * DAY;
 }
@@ -410,6 +426,8 @@ function viewHome() {
     '<div class="stats"><span>🔥 ' + streakNow() + ' <small>' + esc(t('streak')) + '</small></span></div></div>' + bar(pct) +
     '<div class="muted small">' + (l.to ? ST.xp + ' / ' + l.to + ' ' + esc(t('xp')) : ST.xp + ' ' + esc(t('xp'))) + '</div></section>';
   h += '<section class="panel"><div class="muted small">' + esc(t('road')) + ' - ' + Math.round(op) + '%</div><div class="road" dir="ltr"><div class="lane"></div>' + flags + '<span class="mile end">🏁</span><div class="car" style="left:' + cp + '%">' + CAR + '</div></div></section>';
+  const known = ALL_IDS.length - allLeft().length;
+  h += '<div class="actions"><button class="btn primary" data-act="all"><b>🗂️ ' + esc(t('all')) + '</b><span class="pct">' + firstPct() + '%</span><small>' + esc(t('firstTry')) + ' · ' + firstRight() + ' / ' + ALL_IDS.length + ' ' + esc(t('questions')) + '</small><small>' + known + ' ' + esc(t('allKnown')) + '</small></button></div>';
   h += '<div class="actions"><button class="btn primary" data-act="simulate"><b>🎙️ ' + esc(t('sim')) + '</b><small>' + esc(t('simSub')) + '</small></button><button class="btn" data-act="daily"><b>▶ ' + esc(t('daily')) + '</b><small>' + esc(t('dailySub')) + '</small></button>' +
     '<button class="btn" data-act="exam"><b>📝 ' + esc(t('mock')) + '</b><small>' + esc(t('mockSub')) + '</small></button>' +
     '<button class="btn" data-act="badges"><b>🏅 ' + esc(t('badges')) + '</b><small>' + Object.keys(ST.badges).length + ' / ' + BADGES.length + '</small></button></div>';
@@ -450,7 +468,7 @@ function svgBox(c) { return c.svg ? '<div class="svgbox">' + c.svg + '</div>' : 
 
 function viewStudy() {
   const c = BYID[SES.queue[SES.i]], L = clang(), cur = SES.cur, exam = SES.kind === 'exam';
-  const top = '<div class="prog"><span>' + (SES.i + 1) + ' / ' + SES.queue.length + '</span>' + bar(100 * SES.i / SES.queue.length) + (exam ? '' : '<span class="combo' + (SES.combo >= 3 ? ' hot' : '') + '">🔥 x' + SES.combo + '</span>') + '</div>';
+  const top = '<div class="prog"><span>' + (SES.i + 1) + ' / ' + SES.queue.length + '</span>' + bar(100 * SES.i / SES.queue.length) + (exam || SES.kind === 'all' ? '' : '<span class="combo' + (SES.combo >= 3 ? ' hot' : '') + '">🔥 x' + SES.combo + '</span>') + '</div>';
   let h = top + '<section class="card' + (cur.shake ? ' shake' : '') + '" id="card" dir="' + dirOf(L) + '" lang="' + L + '">' + cardHead(c, L);
   if (c.type === 'sim') {
     h += '<div class="phase">' + esc(pick(c.phase, L)) + '</div><div class="alabel">' + esc(t('testerSays')) + '</div><div class="say" dir="ltr">🎙️ ' + esc(c.say) + '</div>';
@@ -473,6 +491,7 @@ function viewStudy() {
     if (cur.mc) h += '<div class="fb ' + (ok ? 'good' : 'bad') + '">' + (ok ? '✅ ' + esc(t('correct')) + (cur.gain ? ' <b>+' + cur.gain + ' XP</b>' : '') : '❌ ' + esc(t('wrong'))) + '</div>';
     h += '<div class="answer"><div class="alabel">' + esc(t('answerIs')) + '</div>' + answerHTML(c, L) + '</div>';
     if (cur.mc) h += '<button class="btn primary wide" data-act="next">' + esc(t('next')) + ' ➜</button>';
+    else if (SES.kind === 'all') h += '<div class="grades two"><button class="g0" data-act="repeat">↺ ' + esc(t('repeat')) + '</button><button class="g2" data-act="know">✓ ' + esc(t('iKnow')) + '</button></div>';
     else h += '<div class="grades"><button class="g0" data-act="grade" data-g="0">↺ ' + esc(t('again')) + '</button><button class="g1" data-act="grade" data-g="1">' + esc(t('hard')) + '</button><button class="g2" data-act="grade" data-g="2">👍 ' + esc(t('good')) + '</button><button class="g3" data-act="grade" data-g="3">⚡ ' + esc(t('easy')) + '</button></div>';
   }
   return h + '</section>';
@@ -552,6 +571,43 @@ function pickIds(pool, n) {
   const sorted = shuffle(pool).sort((a, b) => (prio(a) - prio(b)) || (prio(a) === 3 ? lastSeen(a) - lastSeen(b) : 0));
   return shuffle(sorted.slice(0, n)).map(c => c.id);
 }
+/* "All questions": every distinct question once per pass; "I know" retires it for good, "Repeat" brings it back 5 cards later.
+   ST.all.seen holds the ids shown in the current pass, so closing the app mid-pass never repeats a card. */
+const normQ = s => String(s || '').toLowerCase().replace(/[^a-z֐-׿0-9]/g, '');
+const CANON = {};
+const ALL_IDS = (() => {
+  const en = {}, he = {}, out = [];
+  CARDS.forEach(c => {
+    const tail = normQ(c.name && c.name[0]) + '|' + (c.svg || '');
+    const ke = normQ(c.q && c.q[0]) + '|' + tail, kh = normQ(c.q && c.q[1]) + '|' + tail;
+    const dupOf = en[ke] || he[kh];
+    if (dupOf) { CANON[c.id] = dupOf; return; }
+    en[ke] = he[kh] = c.id; out.push(c.id);
+  });
+  return out;
+})();
+const allState = () => {
+  const A = ST.all && typeof ST.all === 'object' ? ST.all : (ST.all = {});
+  ['known', 'seen', 'rep'].forEach(k => { if (!A[k] || typeof A[k] !== 'object') A[k] = {}; });
+  return A;
+};
+const allLeft = () => ALL_IDS.filter(id => !allState().known[id]);
+function allQueue() {
+  const A = allState(), left = allLeft();
+  const rep = left.filter(id => A.rep[id]);
+  let fresh = left.filter(id => !A.seen[id] && !A.rep[id]);
+  if (!fresh.length && !rep.length) { A.seen = {}; fresh = left; }
+  return shuffle(rep).concat(shuffle(fresh));
+}
+function allGrade(know) {
+  const id = SES.queue[SES.i], A = allState();
+  A.seen[id] = 1;
+  if (know) { A.known[id] = Date.now(); delete A.rep[id]; applyGrade(id, 2, false); }
+  else { A.rep[id] = 1; applyGrade(id, 0, false); SES.queue.splice(Math.min(SES.i + 6, SES.queue.length), 0, id); }
+  if (know) SES.right++; else SES.wrong++;
+  save();
+  nextCard();
+}
 function buildExam() {
   const room = CARDS.filter(c => c.deck === 'room' && hasMC(c));
   const of = ty => CARDS.filter(c => c.type === ty);
@@ -559,7 +615,8 @@ function buildExam() {
 }
 function startSession(kind, deck, mode) {
   let ids;
-  if (kind === 'daily') ids = pickIds(CARDS, 20);
+  if (kind === 'daily') { const k = allState().known, pool = CARDS.filter(c => !k[CANON[c.id] || c.id]); ids = pickIds(pool.length >= 20 ? pool : CARDS, 20); }
+  else if (kind === 'all') { ids = allQueue(); if (!ids.length) { toast(t('allDone')); return; } }
   else if (kind === 'exam') ids = buildExam();
   else if (deck === 'sim') ids = deckCards('sim').map(c => c.id);
   else ids = pickIds(deckCards(deck), 15);
@@ -570,7 +627,7 @@ function startSession(kind, deck, mode) {
 function showCard() {
   const c = BYID[SES.queue[SES.i]];
   VIEW.cardLang = null;
-  const wantMC = SES.kind === 'exam' || SES.mode === 'quiz';
+  const wantMC = SES.kind !== 'all' && (SES.kind === 'exam' || SES.mode === 'quiz');
   SES.cur = { mc: wantMC && hasMC(c) ? optionsFor(c) : null, picked: null, revealed: false, gain: 0, shake: false };
   render();
   if (ST.tts) { if (c.type === 'sim') TTS.say(c.say, 'en'); else TTS.say(qText(c, clang()), clang()); }
@@ -675,6 +732,9 @@ document.addEventListener('click', e => {
     case 'simulate': startSession('deck', 'sim', 'flip'); break;
     case 'daily': startSession('daily', null, 'quiz'); break;
     case 'exam': startSession('exam', null, 'quiz'); break;
+    case 'all': startSession('all', null, 'flip'); break;
+    case 'know': if (SES && SES.kind === 'all' && VIEW.screen === 'study') allGrade(true); break;
+    case 'repeat': if (SES && SES.kind === 'all' && VIEW.screen === 'study') allGrade(false); break;
     case 'practice': startSession('deck', VIEW.deck, 'quiz'); break;
     case 'flashdeck': startSession('deck', VIEW.deck, 'flip'); break;
     case 'browse': VIEW.filter = ''; VIEW.screen = 'browse'; render(); break;
@@ -697,7 +757,7 @@ document.addEventListener('click', e => {
       try { const o = JSON.parse(decodeURIComponent(escape(atob($('#code').value.replace(/\s+/g, ''))))); if (!o || typeof o.xp !== 'number' || !o.cards) throw 0; ST = normState(o); save(); toast(t('restored')); render(); } catch (err) { toast(t('badCode')); }
       break;
     }
-    case 'reset': if (confirm(t('resetAsk'))) { ST = Object.assign(normState(ST), { xp: 0, streak: { last: '', n: 0, max: 0 }, cards: {}, badges: {}, exams: [], answered: 0, correct: 0, bestCombo: 0, lang: ST.lang }); save(); render(); } break;
+    case 'reset': if (confirm(t('resetAsk'))) { ST = Object.assign(normState(ST), { xp: 0, streak: { last: '', n: 0, max: 0 }, cards: {}, badges: {}, exams: [], answered: 0, correct: 0, bestCombo: 0, all: {}, first: {}, lang: ST.lang }); save(); render(); } break;
   }
 });
 document.addEventListener('change', e => { if (e.target.id === 'autoread') { ST.tts = e.target.checked; save(); if (ST.tts && !TTS.ok) toast(t('noTts')); } });
@@ -710,7 +770,10 @@ document.addEventListener('keydown', e => {
   if (/^[1-4]$/.test(e.key) && SES.cur.mc && SES.cur.picked == null) pickAnswer(+e.key - 1);
 });
 window.addEventListener('error', () => { /* keep UI alive */ });
-(async () => { try { await store.init(); ST = loadState(); } catch (e) { /* defaults */ } render(); })();
+(async () => { try { await store.init(); ST = loadState(); } catch (e) { /* defaults */ } try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) { /* ignore */ } render(); })();
+/* First-try score: share of all distinct questions answered right on the very first try. 100% = every question, first time. */
+const firstRight = () => ALL_IDS.filter(id => ST.first[id] === 1).length;
+const firstPct = () => Math.floor(100 * firstRight() / ALL_IDS.length);
 
 </script>
 </body>
